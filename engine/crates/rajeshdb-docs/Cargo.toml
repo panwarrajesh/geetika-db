@@ -1,0 +1,9 @@
+[package]
+name = "rajeshdb-docs"
+version = "0.1.0"
+edition = "2021"
+description = "RajeshDB document layer: collections, JSON documents, secondary indexes, queries"
+
+[dependencies]
+rajeshdb-core = { path = "../rajeshdb-core" }
+serde_json = "1"

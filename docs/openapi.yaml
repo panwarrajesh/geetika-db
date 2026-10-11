@@ -1,0 +1,166 @@
+openapi: 3.0.3
+info:
+  title: RajeshDB API
+  version: 0.1.0
+  description: |
+    Phase 4 HTTP API. Single database, API-key auth with roles (read < write < admin).
+    Terminate TLS in a reverse proxy; the server itself speaks plain HTTP on 127.0.0.1 by default.
+servers:
+  - url: http://127.0.0.1:8080
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              enum: [invalid_argument, unauthorized, forbidden, not_found, already_exists, schema_violation, rate_limited, internal]
+            message: { type: string }
+    Query:
+      type: object
+      properties:
+        filter: { type: object, description: "equality, $eq $ne $gt $gte $lt $lte $in $nin $exists, $and, $or, dotted paths" }
+        sort:
+          oneOf:
+            - type: string
+            - type: object
+              properties:
+                field: { type: string }
+                order: { type: string, enum: [asc, desc] }
+        skip: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 0, description: "default 100, server maximum 1000" }
+  responses:
+    Err:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+paths:
+  /health:
+    get:
+      security: []
+      summary: Liveness check (no auth)
+      responses:
+        '200': { description: ok }
+  /v1/collections:
+    get:
+      summary: List collections (read)
+      responses: { '200': { description: ok }, '401': { $ref: '#/components/responses/Err' } }
+    post:
+      summary: Create collection (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, description: "1-64 chars of A-Z a-z 0-9 _ -" }
+                schema: { type: object, description: "{fields:{f:{type,required}}, additionalProperties}" }
+      responses: { '201': { description: created }, '409': { $ref: '#/components/responses/Err' } }
+  /v1/collections/{coll}:
+    parameters: [ { name: coll, in: path, required: true, schema: { type: string } } ]
+    delete:
+      summary: Drop collection and its documents/indexes (admin)
+      responses: { '200': { description: ok }, '404': { $ref: '#/components/responses/Err' } }
+  /v1/collections/{coll}/indexes:
+    parameters: [ { name: coll, in: path, required: true, schema: { type: string } } ]
+    get:
+      summary: List indexes (read)
+      responses: { '200': { description: ok } }
+    post:
+      summary: Create index on a dotted field path, backfilled (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [field], properties: { field: { type: string } } }
+      responses: { '201': { description: created } }
+  /v1/collections/{coll}/indexes/{field}:
+    parameters:
+      - { name: coll, in: path, required: true, schema: { type: string } }
+      - { name: field, in: path, required: true, schema: { type: string } }
+    delete:
+      summary: Drop index (admin)
+      responses: { '200': { description: ok }, '404': { $ref: '#/components/responses/Err' } }
+  /v1/collections/{coll}/documents:
+    parameters: [ { name: coll, in: path, required: true, schema: { type: string } } ]
+    post:
+      summary: Insert a JSON object; _id generated if absent (write)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        '201': { description: "{\"_id\": \"...\"}" }
+        '409': { $ref: '#/components/responses/Err' }
+        '422': { $ref: '#/components/responses/Err' }
+  /v1/collections/{coll}/documents/{id}:
+    parameters:
+      - { name: coll, in: path, required: true, schema: { type: string } }
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Get a document (read)
+      responses: { '200': { description: the document }, '404': { $ref: '#/components/responses/Err' } }
+    put:
+      summary: Replace a document (write)
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses: { '200': { description: ok }, '404': { $ref: '#/components/responses/Err' } }
+    delete:
+      summary: Delete a document (write)
+      responses: { '200': { description: ok }, '404': { $ref: '#/components/responses/Err' } }
+  /v1/collections/{coll}/query:
+    parameters: [ { name: coll, in: path, required: true, schema: { type: string } } ]
+    post:
+      summary: Query (read). Empty body matches all. Response includes the chosen plan.
+      requestBody:
+        content: { application/json: { schema: { $ref: '#/components/schemas/Query' } } }
+      responses:
+        '200': { description: "{documents, count, skip, limit, plan}" }
+        '400': { $ref: '#/components/responses/Err' }
+  /v1/collections/{coll}/update:
+    parameters: [ { name: coll, in: path, required: true, schema: { type: string } } ]
+    post:
+      summary: Shallow-merge top-level fields into matching documents (write)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filter, set]
+              properties:
+                filter: { type: object }
+                set: { type: object }
+                confirm_all: { type: boolean, description: "required when filter is empty" }
+      responses: { '200': { description: "{modified: n}" } }
+  /v1/collections/{coll}/delete:
+    parameters: [ { name: coll, in: path, required: true, schema: { type: string } } ]
+    post:
+      summary: Delete matching documents (write)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filter]
+              properties:
+                filter: { type: object }
+                confirm_all: { type: boolean }
+      responses: { '200': { description: "{deleted: n}" } }
+  /v1/admin/flush:
+    post: { summary: Flush memtable to disk (admin), responses: { '200': { description: ok } } }
+  /v1/admin/compact:
+    post: { summary: Compact SSTables (admin), responses: { '200': { description: ok } } }
+  /v1/admin/metrics:
+    get: { summary: Real request and engine metrics (admin), responses: { '200': { description: ok } } }

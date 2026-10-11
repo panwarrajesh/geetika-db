@@ -1,0 +1,4 @@
+target/
+rajeshdb-data/
+*.log
+.env

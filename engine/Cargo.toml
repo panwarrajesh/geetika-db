@@ -1,0 +1,6 @@
+[workspace]
+members = ["crates/rajeshdb-core", "crates/rajeshdb-docs", "crates/rajeshdb-server", "crates/rajeshdb-cli"]
+resolver = "2"
+
+[profile.release]
+opt-level = 3

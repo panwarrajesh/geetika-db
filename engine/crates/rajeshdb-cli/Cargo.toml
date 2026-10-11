@@ -1,0 +1,13 @@
+[package]
+name = "rajeshdb-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rajeshdb"
+path = "src/main.rs"
+
+[dependencies]
+rajeshdb-core = { path = "../rajeshdb-core" }
+rajeshdb-docs = { path = "../rajeshdb-docs" }
+serde_json = "1"
