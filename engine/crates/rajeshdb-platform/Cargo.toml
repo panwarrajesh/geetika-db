@@ -1,0 +1,18 @@
+[package]
+name = "rajeshdb-platform"
+version = "0.1.0"
+edition = "2021"
+description = "RajeshDB multi-tenant control plane + data plane API (Phase 5)"
+
+[dependencies]
+rajeshdb-docs = { path = "../rajeshdb-docs" }
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+serde_json = "1"
+sha2 = "0.10"
+getrandom = "0.2"
+argon2 = "0.5"
+
+[dev-dependencies]
+tower = { version = "0.4", features = ["util"] }
+http-body-util = "0.1"

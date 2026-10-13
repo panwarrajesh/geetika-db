@@ -513,6 +513,16 @@ impl DocDb {
         Ok(self.db.compact()?)
     }
 
+    /// Consistent copy of the whole database into an empty directory (see `Db::checkpoint`).
+    pub fn checkpoint(&mut self, dest: &Path) -> Result<Vec<String>> {
+        Ok(self.db.checkpoint(dest)?)
+    }
+
+    /// Verify the checksum of every stored record; returns the record count.
+    pub fn verify_integrity(&self) -> Result<u64> {
+        Ok(self.db.verify_integrity()?)
+    }
+
     pub fn stats(&self) -> Stats {
         self.db.stats()
     }

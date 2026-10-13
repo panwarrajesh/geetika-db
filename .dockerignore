@@ -1,0 +1,10 @@
+**/target
+**/node_modules
+**/dist
+.git
+.github
+**/.env
+**/rajeshdb-data
+**/rajeshdb-docs-data
+**/rajeshdb-platform-data
+**/rajeshdb-server-data

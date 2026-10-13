@@ -1,6 +1,10 @@
 [workspace]
-members = ["crates/rajeshdb-core", "crates/rajeshdb-docs", "crates/rajeshdb-server", "crates/rajeshdb-cli"]
+members = ["crates/rajeshdb-core", "crates/rajeshdb-docs", "crates/rajeshdb-server", "crates/rajeshdb-platform", "crates/rajeshdb-bench", "crates/rajeshdb-cli"]
 resolver = "2"
 
 [profile.release]
+opt-level = 3
+
+# Optimise dependencies (notably argon2) even in debug/test builds so password hashing is fast.
+[profile.dev.package."*"]
 opt-level = 3

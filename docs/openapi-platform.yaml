@@ -1,0 +1,103 @@
+openapi: 3.0.3
+info:
+  title: RajeshDB Platform API
+  version: 0.1.0
+  description: |
+    Phase 5 multi-tenant API (binary: rajeshdb-platform, default http://127.0.0.1:8081).
+    Two kinds of bearer credentials:
+      * session token `rdbs_...` from /v1/auth/login  -> manage orgs, projects, keys; also data access
+        according to org role (owner/admin = admin on data, member = read)
+      * project API key `rdb_...` (read|write|admin) bound to ONE project and ONE environment -> data only
+    Data of different projects is stored in separate databases. Any attempt to reach a project
+    you cannot access returns 404 (existence is not revealed).
+servers:
+  - url: http://127.0.0.1:8081
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+    operatorToken: { type: http, scheme: bearer, description: "Server operator secret (RAJESHDB_OPERATOR_TOKEN), not a user session" }
+paths:
+  /health: { get: { security: [], summary: Liveness, responses: { '200': { description: ok } } } }
+  /v1/auth/register:
+    post:
+      security: []
+      summary: Create a user. Body {email, password(10-128 chars)}. Passwords are stored as Argon2id hashes.
+      responses: { '201': { description: created }, '400': { description: invalid }, '409': { description: e-mail taken }, '429': { description: throttled } }
+  /v1/auth/login:
+    post:
+      security: []
+      summary: Body {email, password}. Returns {token, expires_in}. Same 401 for unknown e-mail and wrong password.
+      responses: { '200': { description: ok }, '401': { description: invalid }, '429': { description: throttled } }
+  /v1/auth/logout: { post: { summary: Invalidate the current session token, responses: { '200': { description: ok } } } }
+  /v1/me: { get: { summary: Current user, responses: { '200': { description: ok } } } }
+  /v1/orgs:
+    get: { summary: Organizations of the current user, responses: { '200': { description: ok } } }
+    post: { summary: "Create organization {name}; caller becomes owner", responses: { '201': { description: created } } }
+  /v1/orgs/{org}/members:
+    get: { summary: List members (any member), responses: { '200': { description: ok } } }
+    post: { summary: "Add existing user {email, role: admin|member} (admin+; only owner may add admins)", responses: { '201': { description: added } } }
+  /v1/orgs/{org}/members/{uid}:
+    delete: { summary: Remove member (owner cannot be removed), responses: { '200': { description: ok } } }
+  /v1/orgs/{org}/projects:
+    get: { summary: List projects, responses: { '200': { description: ok } } }
+    post: { summary: "Create project {name}; creates dev, staging, prod environments (admin+)", responses: { '201': { description: created } } }
+  /v1/orgs/{org}/audit:
+    get: { summary: Last 200 audit events (admin+), responses: { '200': { description: ok } } }
+  /v1/projects/{pid}:
+    delete: { summary: Delete project, its keys and ALL its data (owner only), responses: { '200': { description: ok } } }
+  /v1/projects/{pid}/keys:
+    get: { summary: List keys (no secrets) (admin+), responses: { '200': { description: ok } } }
+    post:
+      summary: "Create key {name, env, role, expires_in_secs?}. The api_key is shown ONCE (admin+)"
+      responses: { '201': { description: created } }
+  /v1/projects/{pid}/keys/{kid}:
+    delete: { summary: Revoke key immediately (admin+), responses: { '200': { description: ok } } }
+  /v1/projects/{pid}/keys/{kid}/rotate:
+    post: { summary: "Issue a replacement key; optional {grace_seconds<=604800} keeps the old key alive meanwhile", responses: { '201': { description: created } } }
+  /v1/projects/{pid}/envs/{env}/usage:
+    get: { summary: Real bytes on disk vs. quota, plus engine stats (read), responses: { '200': { description: ok } } }
+  /v1/projects/{pid}/envs/{env}/collections:
+    get: { summary: List collections (read), responses: { '200': { description: ok } } }
+    post: { summary: "Create collection {name, schema?} (admin)", responses: { '201': { description: created } } }
+  /v1/projects/{pid}/envs/{env}/collections/{coll}:
+    delete: { summary: Drop collection (admin), responses: { '200': { description: ok } } }
+  /v1/projects/{pid}/envs/{env}/collections/{coll}/indexes:
+    get: { summary: List indexes (read), responses: { '200': { description: ok } } }
+    post: { summary: "Create index {field} (admin)", responses: { '201': { description: created } } }
+  /v1/projects/{pid}/envs/{env}/collections/{coll}/indexes/{field}:
+    delete: { summary: Drop index (admin), responses: { '200': { description: ok } } }
+  /v1/projects/{pid}/envs/{env}/collections/{coll}/documents:
+    post: { summary: Insert document (write; 507 when the environment quota is reached), responses: { '201': { description: created } } }
+  /v1/projects/{pid}/envs/{env}/collections/{coll}/documents/{id}:
+    get: { summary: Get (read), responses: { '200': { description: ok } } }
+    put: { summary: Replace (write), responses: { '200': { description: ok } } }
+    delete: { summary: Delete (write), responses: { '200': { description: ok } } }
+  /v1/projects/{pid}/envs/{env}/collections/{coll}/query:
+    post: { summary: "Query {filter, sort, skip, limit} (read); response includes the plan", responses: { '200': { description: ok } } }
+  /v1/projects/{pid}/envs/{env}/collections/{coll}/update:
+    post: { summary: "{filter, set, confirm_all?} (write)", responses: { '200': { description: ok } } }
+  /v1/projects/{pid}/envs/{env}/collections/{coll}/delete:
+    post: { summary: "{filter, confirm_all?} (write)", responses: { '200': { description: ok } } }
+  /v1/projects/{pid}/envs/{env}/backups:
+    get: { summary: "List backups, newest first (org admin+, login only; API keys get 403)", responses: { '200': { description: ok } } }
+    post: { summary: "Create a backup now (org admin+). Writers of this environment pause while it is copied", responses: { '201': { description: "backup manifest" } } }
+  /v1/projects/{pid}/envs/{env}/backups/{bid}:
+    delete: { summary: Delete a backup (org owner only), responses: { '200': { description: ok }, '404': { description: unknown id } } }
+  /v1/projects/{pid}/envs/{env}/backups/{bid}/verify:
+    post: { summary: "Full test restore into a scratch folder; returns {ok, entries, files} or {ok:false, error} (org admin+)", responses: { '200': { description: report } } }
+  /v1/projects/{pid}/envs/{env}/backups/{bid}/restore:
+    post:
+      summary: "Replace the environment's data with this backup (org owner only). Body {confirm: <env name>}. A safety backup of the current data is made first."
+      responses: { '200': { description: "{restored, entries, safety_backup}" }, '400': { description: "bad confirmation or backup failed verification" } }
+  /ops/health:
+    get: { security: [ { operatorToken: [] } ], summary: "Deep health. 200 ok/degraded, 503 critical. Disabled (404) unless RAJESHDB_OPERATOR_TOKEN is set", responses: { '200': { description: report }, '503': { description: critical } } }
+  /ops/metrics:
+    get: { security: [ { operatorToken: [] } ], summary: Server-wide metrics as JSON, responses: { '200': { description: ok } } }
+  /ops/metrics/prometheus:
+    get: { security: [ { operatorToken: [] } ], summary: Metrics in Prometheus text format, responses: { '200': { description: text } } }
+  /ops/backup/run:
+    post: { security: [ { operatorToken: [] } ], summary: Back up the control database and every used environment now, responses: { '200': { description: "{succeeded, failed[]}" } } }
+  /ops/backups/control:
+    get: { security: [ { operatorToken: [] } ], summary: List control-database backups, responses: { '200': { description: ok } } }

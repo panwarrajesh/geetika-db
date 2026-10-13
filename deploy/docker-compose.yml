@@ -1,0 +1,57 @@
+# Run from this folder:   cp .env.example .env   (edit it)   then   docker compose up -d --build
+# Only Caddy publishes ports (80/443). The database API is NOT reachable from outside Docker.
+services:
+  platform:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    # To use a prebuilt image instead of building on the server, replace `build:` with e.g.
+    #   image: ghcr.io/YOUR_GITHUB_USER/rajeshdb-platform:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      RAJESHDB_TRUST_PROXY: "true"   # safe here: only Caddy can reach this container
+    volumes:
+      # Persistent storage. DATA_MOUNT is either a host folder (recommended, e.g. /srv/rajeshdb-data)
+      # or a docker volume name. The container user (uid 10001) must be able to write to it.
+      - ${DATA_MOUNT:-rajeshdb-data}:/data
+    expose:
+      - "8081"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "rajeshdb-platform", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    depends_on:
+      platform:
+        condition: service_healthy
+    volumes:
+      - caddy_data:/data      # certificates: keep this volume, or Let's Encrypt rate limits can bite
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+volumes:
+  rajeshdb-data:
+  caddy_data:
+  caddy_config:

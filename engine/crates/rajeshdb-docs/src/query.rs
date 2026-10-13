@@ -41,9 +41,26 @@ fn is_operator_object(m: &Map<String, Value>) -> bool {
     !m.is_empty() && m.keys().all(|k| k.starts_with('$'))
 }
 
+/// Limits that keep a single query from burning unbounded CPU (a filter is evaluated against every document).
+pub const MAX_FILTER_DEPTH: usize = 8;
+pub const MAX_FILTER_NODES: usize = 500;
+pub const MAX_LIST_LEN: usize = 1000;
+
 pub fn validate_filter(f: &Value) -> Result<()> {
+    let mut budget = MAX_FILTER_NODES;
+    validate_at(f, 0, &mut budget)
+}
+
+fn validate_at(f: &Value, depth: usize, budget: &mut usize) -> Result<()> {
+    if depth > MAX_FILTER_DEPTH {
+        return Err(invalid(format!("filter nesting is too deep (maximum {})", MAX_FILTER_DEPTH)));
+    }
     let obj = f.as_object().ok_or_else(|| invalid("filter must be a JSON object"))?;
     for (k, v) in obj {
+        if *budget == 0 {
+            return Err(invalid(format!("filter is too complex (maximum {} conditions)", MAX_FILTER_NODES)));
+        }
+        *budget -= 1;
         if k.starts_with('$') {
             match k.as_str() {
                 "$and" | "$or" => {
@@ -52,7 +69,7 @@ pub fn validate_filter(f: &Value) -> Result<()> {
                         .filter(|a| !a.is_empty())
                         .ok_or_else(|| invalid(format!("{} needs a non-empty array of filters", k)))?;
                     for sub in arr {
-                        validate_filter(sub)?;
+                        validate_at(sub, depth + 1, budget)?;
                     }
                 }
                 _ => return Err(invalid(format!("unknown top-level operator {}", k))),
@@ -73,7 +90,13 @@ pub fn validate_filter(f: &Value) -> Result<()> {
                         "$gt" | "$gte" | "$lt" | "$lte" => {
                             matches!(arg, Value::Number(_) | Value::String(_) | Value::Bool(_))
                         }
-                        "$in" | "$nin" => arg.is_array(),
+                        "$in" | "$nin" => match arg.as_array() {
+                            Some(a) if a.len() > MAX_LIST_LEN => {
+                                return Err(invalid(format!("{} lists may hold at most {} values", op, MAX_LIST_LEN)))
+                            }
+                            Some(_) => true,
+                            None => false,
+                        },
                         "$exists" => arg.is_boolean(),
                         _ => return Err(invalid(format!("unknown operator {}", op))),
                     };
@@ -345,5 +368,30 @@ mod tests {
         assert_eq!(choose_plan(&json!({"name": "x"}), &idx).describe(), "FullScan");
         assert_eq!(choose_plan(&json!({"$or": [{"city": "x"}]}), &idx).describe(), "FullScan");
         assert_eq!(choose_plan(&json!({"city": {"$ne": "x"}}), &idx).describe(), "FullScan");
+    }
+
+    #[test]
+    fn expensive_filters_are_rejected() {
+        // deep nesting
+        let mut f = json!({"a": 1});
+        for _ in 0..(MAX_FILTER_DEPTH + 2) {
+            f = json!({"$and": [f]});
+        }
+        assert!(validate_filter(&f).is_err());
+        // moderate nesting is fine
+        let mut ok = json!({"a": 1});
+        for _ in 0..3 {
+            ok = json!({"$or": [ok, {"b": 2}]});
+        }
+        assert!(validate_filter(&ok).is_ok());
+        // huge $in list
+        let big: Vec<i64> = (0..(MAX_LIST_LEN as i64 + 1)).collect();
+        assert!(validate_filter(&json!({"a": {"$in": big}})).is_err());
+        let fine: Vec<i64> = (0..(MAX_LIST_LEN as i64)).collect();
+        assert!(validate_filter(&json!({"a": {"$in": fine}})).is_ok());
+        // many conditions in total (even if each level is small): 10 x 100 > 500
+        let clause = json!({"$or": (0..100).map(|i| json!({"f": i})).collect::<Vec<_>>()});
+        let many = json!({"$and": (0..10).map(|_| clause.clone()).collect::<Vec<_>>()});
+        assert!(validate_filter(&many).is_err());
     }
 }

@@ -1,0 +1,48 @@
+{
+	# Slow-client protection: Caddy drops connections that send headers/bodies too slowly.
+	servers {
+		timeouts {
+			read_header 10s
+			read_body 30s
+			write 60s
+			idle 2m
+		}
+	}
+}
+
+# SITE_ADDRESS examples:  console.example.com   (public HTTPS, certificate from Let's Encrypt, automatic)
+#                         localhost             (local test: Caddy's own internal certificate)
+# OPS_ALLOW_IPS: space-separated IPs/CIDRs that may open the Operations page (operator endpoints).
+{$SITE_ADDRESS:localhost} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+		-Server
+	}
+
+	# Operator endpoints are for the person running the service, never for the public internet.
+	@ops_blocked {
+		path /api/ops/*
+		not remote_ip {$OPS_ALLOW_IPS:127.0.0.1}
+	}
+	handle @ops_blocked {
+		respond 404
+	}
+
+	# The dashboard calls /api/...; strip the prefix and forward to the platform container.
+	handle_path /api/* {
+		reverse_proxy platform:8081
+	}
+
+	# Everything else: the dashboard (single-page app).
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

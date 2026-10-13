@@ -395,6 +395,45 @@ impl Db {
         Ok(())
     }
 
+    /// Write a consistent, self-contained copy of the database into `dest` (must be empty or
+    /// not exist yet): flushes the memtable, copies the immutable table files and writes a
+    /// fresh MANIFEST. The copy is a normal database directory: open it with `Db::open`.
+    /// Needs `&mut self`, so writers are paused while the copy is made.
+    pub fn checkpoint(&mut self, dest: &Path) -> io::Result<Vec<String>> {
+        self.flush()?;
+        fs::create_dir_all(dest)?;
+        if fs::read_dir(dest)?.next().is_some() {
+            return Err(invalid_input("checkpoint destination must be empty"));
+        }
+        let mut names = Vec::new();
+        for t in &self.tables {
+            let name = t
+                .path()
+                .file_name()
+                .ok_or_else(|| corrupt("table path has no file name"))?
+                .to_owned();
+            let to = dest.join(&name);
+            fs::copy(t.path(), &to)?;
+            OpenOptions::new().write(true).open(&to)?.sync_all()?;
+            names.push(name.to_string_lossy().into_owned());
+        }
+        let ids: Vec<u64> = self.tables.iter().map(|t| t.id).collect();
+        write_manifest(dest, &ids)?;
+        names.push("MANIFEST".to_string());
+        names.sort();
+        Ok(names)
+    }
+
+    /// Read every record of every table file and verify its checksum. Returns the number of
+    /// records (tombstones included). Fails with `InvalidData` on any corruption.
+    pub fn verify_integrity(&self) -> io::Result<u64> {
+        let mut n = 0u64;
+        for t in &self.tables {
+            n += t.read_all()?.len() as u64;
+        }
+        Ok(n)
+    }
+
     pub fn stats(&self) -> Stats {
         Stats {
             memtable_entries: self.mem.len(),

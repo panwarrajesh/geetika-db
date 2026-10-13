@@ -1,4 +1,16 @@
 target/
+<<<<<<< HEAD
 rajeshdb-data/
 *.log
 .env
+=======
+node_modules/
+dist/
+.env
+*.log
+rajeshdb-data/
+rajeshdb-docs-data/
+rajeshdb-platform-data/
+rajeshdb-server-data/
+rajeshdb-keys.json
+>>>>>>> origin/feature/rajeshdb-engine
