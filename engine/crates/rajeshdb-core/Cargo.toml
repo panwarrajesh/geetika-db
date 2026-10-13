@@ -1,0 +1,8 @@
+[package]
+name = "rajeshdb-core"
+version = "0.1.0"
+edition = "2021"
+description = "RajeshDB storage engine: WAL + memtable + SSTables (LSM-tree)"
+
+[dependencies]
+# Intentionally empty: Phase 2 uses only the Rust standard library.

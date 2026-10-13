@@ -1,0 +1,10 @@
+target/
+node_modules/
+dist/
+.env
+*.log
+rajeshdb-data/
+rajeshdb-docs-data/
+rajeshdb-platform-data/
+rajeshdb-server-data/
+rajeshdb-keys.json

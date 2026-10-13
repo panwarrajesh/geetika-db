@@ -1,0 +1,64 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+      - name: Tests (whole workspace)
+        working-directory: engine
+        run: cargo test --workspace
+      - name: Release build of the server
+        working-directory: engine
+        run: cargo build --release -p rajeshdb-platform
+
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: dashboard
+        run: npm install
+      - name: Typecheck
+        working-directory: dashboard
+        run: npm run typecheck
+      - name: Unit tests
+        working-directory: dashboard
+        run: npm test
+      - name: Build
+        working-directory: dashboard
+        run: npm run build
+
+  security:
+    # Dependency vulnerability checks. Findings do not block merges yet (continue-on-error);
+    # read the log and update dependencies when something is reported.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo audit
+        working-directory: engine
+        run: |
+          cargo install cargo-audit --locked
+          cargo generate-lockfile
+          cargo audit
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: npm audit
+        working-directory: dashboard
+        run: |
+          npm install --package-lock-only
+          npm audit --audit-level=high
